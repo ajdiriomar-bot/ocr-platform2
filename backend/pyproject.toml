@@ -1,0 +1,22 @@
+[project]
+name = "ocr-backend"
+version = "0.1.0"
+dependencies = [
+    "fastapi",
+    "psycopg2-binary>=2.9.12",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.51",
+    "uvicorn",
+    "passlib[bcrypt]",
+    "bcrypt==4.0.1",
+    "python-jose[cryptography]",
+    "pydantic[email]",
+    "python-multipart",
+    "pillow>=12.3.0",
+    "pytesseract>=0.3.13",
+    "paddlepaddle",
+    "paddleocr",
+    "opencv-python-headless",
+    "numpy",
+]
+requires-python = ">=3.10"
