@@ -51,6 +51,18 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Email ou mot de passe incorrect"
         )
 
+    if user.status == models.AccountStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Votre compte est en cours de vérification. Un administrateur doit l'activer avant que vous puissiez vous connecter."
+        )
+
+    if user.status == models.AccountStatus.suspended:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Votre compte a été suspendu. Veuillez contacter un administrateur."
+        )
+
     access_token_expires = timedelta(minutes=30)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
 
@@ -86,6 +98,31 @@ def update_user_role(
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas modifier votre propre rôle.")
 
     target_user.role = role_update.role
+    db.commit()
+    db.refresh(target_user)
+    return target_user
+
+
+@app.patch("/users/{user_id}/status", response_model=schemas.User)
+def update_user_status(
+    user_id: int,
+    status_update: schemas.UserStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin"))
+):
+    """
+    Change le statut d'un utilisateur (pending/active/suspended).
+    Réservé aux administrateurs. Permet de valider une inscription,
+    activer, ou suspendre un compte.
+    """
+    target_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+
+    if target_user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Vous ne pouvez pas modifier le statut de votre propre compte.")
+
+    target_user.status = status_update.status
     db.commit()
     db.refresh(target_user)
     return target_user

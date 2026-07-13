@@ -1,18 +1,24 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from .models import UserRole
+from .models import UserRole, AccountStatus
 
 
 class UserCreate(BaseModel):
+    first_name: str
+    last_name: str
+    phone_number: str
     email: EmailStr
     password: str
 
 
 class User(BaseModel):
     id: int
+    first_name: str
+    last_name: str
+    phone_number: str
     email: EmailStr
-    is_active: bool
     role: UserRole
+    status: AccountStatus
 
     class Config:
         from_attributes = True
@@ -20,6 +26,10 @@ class User(BaseModel):
 
 class UserRoleUpdate(BaseModel):
     role: UserRole
+
+
+class UserStatusUpdate(BaseModel):
+    status: AccountStatus
 
 
 class DocumentBase(BaseModel):

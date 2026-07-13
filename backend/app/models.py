@@ -11,14 +11,23 @@ class UserRole(str, enum.Enum):
     user = "user"
 
 
+class AccountStatus(str, enum.Enum):
+    pending = "pending"
+    active = "active"
+    suspended = "suspended"
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    phone_number = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    is_active = Column(Boolean, default=True)
     role = Column(Enum(UserRole), default=UserRole.user, nullable=False)
+    status = Column(Enum(AccountStatus), default=AccountStatus.pending, nullable=False)
 
     documents = relationship(
         "Document",
@@ -36,14 +45,12 @@ class Document(Base):
     extracted_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Champs structurés (Étape 6/7)
     provider = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     total_ht = Column(String, nullable=True)
     tva = Column(String, nullable=True)
     total_ttc = Column(String, nullable=True)
 
-    # Validation (réservée à comptable/admin)
     is_validated = Column(Boolean, default=False, nullable=False)
     validated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     validated_at = Column(DateTime, nullable=True)
