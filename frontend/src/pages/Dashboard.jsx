@@ -113,6 +113,7 @@ function Dashboard() {
       } else {
         setStructuredData({
           provider: "Fournisseur Détecté",
+          client: "Client Détecté",
           date: new Date().toLocaleDateString('fr-FR'),
           total_ht: "120.00 €",
           tva: "24.00 €",
@@ -135,6 +136,7 @@ function Dashboard() {
     setIsValidated(doc.is_validated || false);
     setStructuredData({
       provider: doc.provider || "Non détecté",
+      client: doc.client || "Non détecté",
       date: doc.invoice_date || "Non détectée",
       total_ht: doc.total_ht || "0.00 €",
       tva: doc.tva || "0.00 €",
@@ -154,6 +156,7 @@ function Dashboard() {
     try {
       await api.put(`/ocr/documents/${currentDocId}/validate`, {
         provider: structuredData.provider,
+        client: structuredData.client,
         date: structuredData.date,
         total_ht: structuredData.total_ht,
         tva: structuredData.tva,
@@ -292,7 +295,7 @@ function Dashboard() {
                         Ces champs sont en lecture seule. Seul un comptable ou administrateur peut les corriger et les valider.
                       </p>
                     )}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div>
                         <label className="text-xs font-semibold text-gray-400 uppercase">Fournisseur</label>
                         <input
@@ -301,6 +304,16 @@ function Dashboard() {
                           className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
                           value={structuredData.provider}
                           onChange={(e) => canEditFields && setStructuredData({...structuredData, provider: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 uppercase">Client</label>
+                        <input
+                          type="text"
+                          readOnly={!canEditFields}
+                          className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
+                          value={structuredData.client}
+                          onChange={(e) => canEditFields && setStructuredData({...structuredData, client: e.target.value})}
                         />
                       </div>
                       <div>

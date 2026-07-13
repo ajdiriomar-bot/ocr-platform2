@@ -58,10 +58,12 @@ class Document(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     provider = Column(String, nullable=True)
+    client = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     total_ht = Column(String, nullable=True)
     tva = Column(String, nullable=True)
     total_ttc = Column(String, nullable=True)
+    
 
     is_validated = Column(Boolean, default=False, nullable=False)
     validated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

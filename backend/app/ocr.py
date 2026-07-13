@@ -62,6 +62,7 @@ def run_ocr_on_image(ocr_engine, image_pil):
 def extract_structured_fields(text: str):
     data = {
         "provider": "Inconnu",
+        "client": "Inconnu",
         "date": "Non détectée",
         "total_ht": "0.00 €",
         "tva": "0.00 €",
@@ -75,6 +76,10 @@ def extract_structured_fields(text: str):
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     if lines:
         data["provider"] = lines[0][:30]
+
+        client_match = re.search(r'(?:client|facturé\s+à|destinataire)[:\s]+([A-Za-zÀ-ÿ0-9\s\.\-]+)', text, re.IGNORECASE)
+    if client_match:
+        data["client"] = client_match.group(1).strip()[:50]
 
     ht_match = re.search(r'(?:total\s+ht|ht)[:\s]+([\d\s,.]+\s?€?)', text, re.IGNORECASE)
     tva_match = re.search(r'(?:tva|taxe)[:\s]+([\d\s,.]+\s?€?)', text, re.IGNORECASE)
@@ -124,6 +129,7 @@ async def extract_text(
             extracted_text=cleaned_text,
             user_id=current_user.id,
             provider=structured_data["provider"],
+            client=structured_data["client"],
             invoice_date=structured_data["date"],
             total_ht=structured_data["total_ht"],
             tva=structured_data["tva"],
@@ -162,6 +168,7 @@ def validate_document(
         raise HTTPException(status_code=404, detail="Document introuvable.")
 
     doc.provider = payload.provider
+    doc.client = payload.client
     doc.invoice_date = payload.date
     doc.total_ht = payload.total_ht
     doc.tva = payload.tva

@@ -46,6 +46,7 @@ class Document(DocumentBase):
     created_at: datetime
     user_id: int
     provider: str | None = None
+    client: str | None = None
     invoice_date: str | None = None
     total_ht: str | None = None
     tva: str | None = None
@@ -61,6 +62,7 @@ class Document(DocumentBase):
 
 class DocumentValidate(BaseModel):
     provider: str
+    client: str
     date: str
     total_ht: str
     tva: str
