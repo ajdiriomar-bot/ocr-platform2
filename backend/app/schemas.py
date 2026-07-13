@@ -53,6 +53,7 @@ class Document(DocumentBase):
     is_validated: bool
     validated_by_id: int | None = None
     validated_at: datetime | None = None
+    lot_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -64,3 +65,26 @@ class DocumentValidate(BaseModel):
     total_ht: str
     tva: str
     total_ttc: str
+
+
+class DocumentAssignLot(BaseModel):
+    lot_id: int | None  # None pour retirer un document d'un lot
+
+
+class LotCreate(BaseModel):
+    reference: str | None = None  # optionnel, auto-généré si absent
+
+
+class Lot(BaseModel):
+    id: int
+    reference: str
+    created_at: datetime
+    created_by_id: int
+    document_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class LotDetail(Lot):
+    documents: list[Document] = []

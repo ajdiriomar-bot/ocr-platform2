@@ -37,6 +37,18 @@ class User(Base):
     )
 
 
+class Lot(Base):
+    __tablename__ = "lots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reference = Column(String, unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    creator = relationship("User", foreign_keys=[created_by_id])
+    documents = relationship("Document", back_populates="lot")
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -55,7 +67,10 @@ class Document(Base):
     validated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     validated_at = Column(DateTime, nullable=True)
 
+    lot_id = Column(Integer, ForeignKey("lots.id"), nullable=True)
+
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     owner = relationship("User", foreign_keys=[user_id], back_populates="documents")
     validator = relationship("User", foreign_keys=[validated_by_id])
+    lot = relationship("Lot", back_populates="documents")

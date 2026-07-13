@@ -7,12 +7,15 @@ from datetime import timedelta
 from .auth import create_access_token, get_current_user, require_role
 from fastapi.middleware.cors import CORSMiddleware
 from . import ocr
+from . import ocr, lots
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
 app.include_router(ocr.router)
+app.include_router(lots.router)
+
 
 origins = [
     "http://localhost:5173",

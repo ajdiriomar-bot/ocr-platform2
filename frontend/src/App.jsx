@@ -4,8 +4,10 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import UserManagement from './pages/UserManagement';
+import LotManagement from './pages/LotManagement';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import ComptableRoute from './components/ComptableRoute';
 
 function App() {
   return (
@@ -29,6 +31,16 @@ function App() {
               <AdminRoute>
                 <UserManagement />
               </AdminRoute>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/lots"
+          element={
+            <ProtectedRoute>
+              <ComptableRoute>
+                <LotManagement />
+              </ComptableRoute>
             </ProtectedRoute>
           }
         />

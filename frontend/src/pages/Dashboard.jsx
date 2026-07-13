@@ -194,6 +194,14 @@ function Dashboard() {
           <div className="flex justify-between h-16 items-center">
             <h1 className="text-xl font-bold text-blue-600">OCR Accounting Platform 🚀</h1>
             <div className="flex items-center gap-3">
+              {(userRole === 'admin' || userRole === 'comptable') && (
+                <button
+                  onClick={() => navigate('/lots')}
+                  className="px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors"
+                >
+                  📦 Gestion des lots
+                </button>
+              )}
               {userRole === 'admin' && (
                 <button
                   onClick={() => navigate('/admin/users')}

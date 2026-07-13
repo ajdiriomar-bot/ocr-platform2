@@ -1,0 +1,87 @@
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from . import models, schemas, auth
+from .database import get_db
+
+router = APIRouter(
+    prefix="/lots",
+    tags=["Lots de factures"]
+)
+
+
+@router.post("", response_model=schemas.Lot)
+def create_lot(
+    payload: schemas.LotCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("admin", "comptable"))
+):
+    if payload.reference:
+        existing = db.query(models.Lot).filter(models.Lot.reference == payload.reference).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Cette référence de lot existe déjà.")
+
+    new_lot = models.Lot(
+        reference=payload.reference or "TEMP",
+        created_by_id=current_user.id
+    )
+    db.add(new_lot)
+    db.commit()
+    db.refresh(new_lot)
+
+    if not payload.reference:
+        new_lot.reference = f"LOT-{new_lot.id:05d}"
+        db.commit()
+        db.refresh(new_lot)
+
+    result = schemas.Lot.model_validate(new_lot)
+    result.document_count = 0
+    return result
+
+
+@router.get("", response_model=list[schemas.Lot])
+def list_lots(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("admin", "comptable"))
+):
+    lots = db.query(models.Lot).all()
+    results = []
+    for lot in lots:
+        item = schemas.Lot.model_validate(lot)
+        item.document_count = len(lot.documents)
+        results.append(item)
+    return results
+
+
+@router.get("/{lot_id}", response_model=schemas.LotDetail)
+def get_lot(
+    lot_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("admin", "comptable"))
+):
+    lot = db.query(models.Lot).filter(models.Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot introuvable.")
+
+    result = schemas.LotDetail.model_validate(lot)
+    result.document_count = len(lot.documents)
+    result.documents = [schemas.Document.model_validate(d) for d in lot.documents]
+    return result
+
+
+@router.delete("/{lot_id}")
+def delete_lot(
+    lot_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("admin", "comptable"))
+):
+    
+    lot = db.query(models.Lot).filter(models.Lot.id == lot_id).first()
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot introuvable.")
+
+    for doc in lot.documents:
+        doc.lot_id = None
+
+    db.delete(lot)
+    db.commit()
+    return {"message": f"Lot {lot.reference} supprimé. Les documents associés ont été détachés."}

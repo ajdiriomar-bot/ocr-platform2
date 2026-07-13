@@ -156,10 +156,7 @@ def validate_document(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.require_role("admin", "comptable"))
 ):
-    """
-    Valide/corrige les données structurées d'un document.
-    Réservé aux comptables et administrateurs.
-    """
+    
     doc = db.query(models.Document).filter(models.Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document introuvable.")
@@ -183,10 +180,33 @@ def get_user_history(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    """
-    Utilisateur normal : voit uniquement ses propres documents.
-    Comptable/Admin : voient les documents de tous les utilisateurs.
-    """
+    
     if current_user.role.value in ("admin", "comptable"):
         return db.query(models.Document).all()
     return db.query(models.Document).filter(models.Document.user_id == current_user.id).all()
+
+
+@router.put("/documents/{document_id}/lot", response_model=schemas.Document)
+def assign_document_to_lot(
+    document_id: int,
+    payload: schemas.DocumentAssignLot,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role("admin", "comptable"))
+):
+    """
+    Assigne (ou retire, si lot_id=null) un document à un lot.
+    Réservé aux comptables et administrateurs.
+    """
+    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document introuvable.")
+
+    if payload.lot_id is not None:
+        lot = db.query(models.Lot).filter(models.Lot.id == payload.lot_id).first()
+        if not lot:
+            raise HTTPException(status_code=404, detail="Lot introuvable.")
+
+    doc.lot_id = payload.lot_id
+    db.commit()
+    db.refresh(doc)
+    return doc
