@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api'; 
+import * as XLSX from 'xlsx';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -183,6 +184,32 @@ function Dashboard() {
     downloadAnchor.remove();
   };
 
+  const handleExportExcel = () => {
+    if (!structuredData) return;
+
+    const wsData = [
+      ['Fournisseur', 'Client', 'Date Facture', 'Total HT', 'TVA', 'Total TTC'],
+      [
+        structuredData.provider,
+        structuredData.client,
+        structuredData.date,
+        structuredData.total_ht,
+        structuredData.tva,
+        structuredData.total_ttc
+      ]
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+    worksheet['!cols'] = [
+      { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 15 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Facture');
+
+    XLSX.writeFile(workbook, `facture_${structuredData.provider.replace(/\s+/g, '_')}.xlsx`);
+  };
+
   const filteredHistory = history.filter(doc => 
     doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -362,9 +389,14 @@ function Dashboard() {
                     
                     {/* Boutons d'action : Validation + Export */}
                     <div className="flex justify-between pt-4 border-t mt-4">
-                      <button onClick={handleExportJSON} className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
-                        📥 Extraire au format JSON (Étape 10)
-                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={handleExportJSON} className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
+                          📥 JSON
+                        </button>
+                        <button onClick={handleExportExcel} className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
+                          📊 Excel
+                        </button>
+                      </div>
                       {canValidate && currentDocId && (
                         <button
                           onClick={handleValidate}
