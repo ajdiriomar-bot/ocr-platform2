@@ -400,12 +400,12 @@ function Dashboard() {
                       {canValidate && currentDocId && (
                         <button
                           onClick={handleValidate}
-                          disabled={validating || isValidated}
+                          disabled={validating}
                           className={`px-5 py-2 rounded-lg font-medium shadow-sm transition-colors text-white ${
-                            isValidated ? 'bg-green-300 cursor-not-allowed' : validating ? 'bg-green-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                            validating ? 'bg-green-400 cursor-not-allowed' : isValidated ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-green-600 hover:bg-green-700'
                           }`}
                         >
-                          {isValidated ? '✓ Déjà validé' : validating ? 'Validation...' : '✓ Valider les données'}
+                          {validating ? 'Enregistrement...' : isValidated ? '🔄 Mettre à jour les données' : '✓ Valider les données'}
                         </button>
                       )}
                     </div>
