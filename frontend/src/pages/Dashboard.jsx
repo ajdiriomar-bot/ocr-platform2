@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 function Dashboard() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const batchFileInputRef = useRef(null);
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -21,6 +22,15 @@ function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("structured");
   const [userRole, setUserRole] = useState(null);
+
+  // --- Traitement par lot (comptable/admin uniquement) ---
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchFiles, setBatchFiles] = useState([]);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [batchResults, setBatchResults] = useState([]);
+  const [batchLotRef, setBatchLotRef] = useState(null);
+  const [batchError, setBatchError] = useState("");
 
   const canValidate = userRole === 'admin' || userRole === 'comptable';
 
@@ -116,6 +126,9 @@ function Dashboard() {
           provider: "Fournisseur Détecté",
           client: "Client Détecté",
           date: new Date().toLocaleDateString('fr-FR'),
+          ice: "Non détecté",
+          if_number: "Non détecté",
+          rc: "Non détecté",
           total_ht: "120.00 €",
           tva: "24.00 €",
           total_ttc: "144.00 €"
@@ -139,6 +152,9 @@ function Dashboard() {
       provider: doc.provider || "Non détecté",
       client: doc.client || "Non détecté",
       date: doc.invoice_date || "Non détectée",
+      ice: doc.ice || "Non détecté",
+      if_number: doc.if_number || "Non détecté",
+      rc: doc.rc || "Non détecté",
       total_ht: doc.total_ht || "0.00 €",
       tva: doc.tva || "0.00 €",
       total_ttc: doc.total_ttc || "0.00 €"
@@ -159,6 +175,9 @@ function Dashboard() {
         provider: structuredData.provider,
         client: structuredData.client,
         date: structuredData.date,
+        ice: structuredData.ice,
+        if_number: structuredData.if_number,
+        rc: structuredData.rc,
         total_ht: structuredData.total_ht,
         tva: structuredData.tva,
         total_ttc: structuredData.total_ttc,
@@ -188,10 +207,13 @@ function Dashboard() {
     if (!structuredData) return;
 
     const wsData = [
-      ['Fournisseur', 'Client', 'Date Facture', 'Total HT', 'TVA', 'Total TTC'],
+      ['Fournisseur', 'Client', 'ICE', 'IF', 'RC', 'Date Facture', 'Total HT', 'TVA', 'Total TTC'],
       [
         structuredData.provider,
         structuredData.client,
+        structuredData.ice,
+        structuredData.if_number,
+        structuredData.rc,
         structuredData.date,
         structuredData.total_ht,
         structuredData.tva,
@@ -201,13 +223,121 @@ function Dashboard() {
 
     const worksheet = XLSX.utils.aoa_to_sheet(wsData);
     worksheet['!cols'] = [
-      { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 15 }
+      { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 15 }
     ];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Facture');
 
     XLSX.writeFile(workbook, `facture_${structuredData.provider.replace(/\s+/g, '_')}.xlsx`);
+  };
+
+  // --- Fonctions de traitement par lot ---
+
+  const handleBatchFilesChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setBatchFiles(prev => [...prev, ...Array.from(e.target.files)]);
+      setBatchResults([]);
+      setBatchLotRef(null);
+      setBatchError("");
+    }
+  };
+
+  const removeBatchFile = (index) => {
+    setBatchFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProcessBatch = async () => {
+    if (batchFiles.length === 0) return;
+
+    setBatchProcessing(true);
+    setBatchError("");
+    setBatchResults([]);
+    setBatchProgress({ current: 0, total: batchFiles.length });
+
+    try {
+      const lotResponse = await api.post('/lots', {});
+      const lotId = lotResponse.data.id;
+      setBatchLotRef(lotResponse.data.reference);
+
+      const results = [];
+
+      for (let i = 0; i < batchFiles.length; i++) {
+        const currentFile = batchFiles[i];
+        setBatchProgress({ current: i + 1, total: batchFiles.length });
+
+        // Pause de sécurité entre chaque fichier pour laisser PaddleOCR libérer la mémoire
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append('file', currentFile);
+
+          const extractResponse = await api.post('/ocr/extract', formData);
+          const docId = extractResponse.data.id;
+
+          await api.put(`/ocr/documents/${docId}/lot`, { lot_id: lotId });
+
+          results.push({
+            filename: currentFile.name,
+            id: docId,
+            structured_data: extractResponse.data.structured_data,
+            status: 'done'
+          });
+        } catch (err) {
+          results.push({
+            filename: currentFile.name,
+            status: 'error',
+            error_message: err.response?.data?.detail || "Erreur lors du traitement."
+          });
+        }
+      }
+
+      setBatchResults(results);
+      setBatchFiles([]);
+      fetchHistory();
+    } catch (err) {
+      setBatchError(err.response?.data?.detail || "Erreur lors de la création du lot.");
+    } finally {
+      setBatchProcessing(false);
+    }
+  };
+
+  const handleExportBatchExcel = () => {
+    const successfulResults = batchResults.filter(r => r.status === 'done' && r.structured_data);
+    if (successfulResults.length === 0) return;
+
+    const wsData = [
+      ['Fichier', 'Fournisseur', 'Client', 'ICE', 'IF', 'RC', 'Date Facture', 'Total HT', 'TVA', 'Total TTC']
+    ];
+
+    successfulResults.forEach(r => {
+      const d = r.structured_data;
+      wsData.push([
+        r.filename,
+        d.provider,
+        d.client,
+        d.ice,
+        d.if_number,
+        d.rc,
+        d.date,
+        d.total_ht,
+        d.tva,
+        d.total_ttc
+      ]);
+    });
+
+    const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+    worksheet['!cols'] = [
+      { wch: 25 }, { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 15 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Lot de factures');
+
+    XLSX.writeFile(workbook, `${batchLotRef || 'lot'}.xlsx`);
   };
 
   const filteredHistory = history.filter(doc => 
@@ -253,50 +383,160 @@ function Dashboard() {
         
         {/* Colonne Gauche : Upload & Validation */}
         <div className="md:col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-2">Traitement de facture</h2>
-            <p className="text-gray-600 mb-6">Importez une facture (image ou PDF) pour exécuter le traitement OCR.</p>
-            
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*,application/pdf" className="hidden" />
 
-            <div 
-              onClick={handleZoneClick} onDragOver={handleDragOver} onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer ${
-                file ? 'border-green-500 bg-green-50/20' : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50/5'
-              }`}
-            >
-              {file ? (
-                <div className="flex flex-col items-center gap-3">
-                  {previewUrl ? (
-                    <img src={previewUrl} alt="Aperçu" className="max-h-48 rounded shadow-md object-contain" />
-                  ) : (
-                    <div className="text-6xl">📄</div>
-                  )}
-                  <p className="text-sm font-medium text-green-600">Fichier prêt : {file?.name || "Document sélectionné"}</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="text-4xl">📥</div>
-                  <p className="text-gray-600 font-medium">Glissez-déposez une facture ici</p>
-                  <p className="text-xs text-gray-400">Images ou PDF — cliquez pour explorer vos fichiers</p>
+          {/* Bascule mode lot (comptable/admin uniquement) */}
+          {canValidate && (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Mode de traitement</p>
+                <p className="text-xs text-gray-400">Basculez pour traiter plusieurs factures d'un coup, regroupées en lot.</p>
+              </div>
+              <button
+                onClick={() => setBatchMode(!batchMode)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  batchMode ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {batchMode ? '📦 Mode Lot actif' : '📄 Passer en mode Lot'}
+              </button>
+            </div>
+          )}
+
+          {!batchMode && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+              <h2 className="text-2xl font-semibold text-gray-800 mb-2">Traitement de facture</h2>
+              <p className="text-gray-600 mb-6">Importez une facture (image ou PDF) pour exécuter le traitement OCR.</p>
+              
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*,application/pdf" className="hidden" />
+
+              <div 
+                onClick={handleZoneClick} onDragOver={handleDragOver} onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer ${
+                  file ? 'border-green-500 bg-green-50/20' : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50/5'
+                }`}
+              >
+                {file ? (
+                  <div className="flex flex-col items-center gap-3">
+                    {previewUrl ? (
+                      <img src={previewUrl} alt="Aperçu" className="max-h-48 rounded shadow-md object-contain" />
+                    ) : (
+                      <div className="text-6xl">📄</div>
+                    )}
+                    <p className="text-sm font-medium text-green-600">Fichier prêt : {file?.name || "Document sélectionné"}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-4xl">📥</div>
+                    <p className="text-gray-600 font-medium">Glissez-déposez une facture ici</p>
+                    <p className="text-xs text-gray-400">Images ou PDF — cliquez pour explorer vos fichiers</p>
+                  </div>
+                )}
+              </div>
+
+              {error && <div className="mt-4 p-3 bg-red-50 text-red-600 border border-red-200 rounded-md text-sm">{error}</div>}
+              {successMessage && <div className="mt-4 p-3 bg-green-50 text-green-700 border border-green-200 rounded-md text-sm">{successMessage}</div>}
+
+              {file && (
+                <div className="mt-6 flex justify-end">
+                  <button onClick={handleUpload} disabled={loading} className={`px-6 py-2.5 rounded-lg font-medium text-white transition-colors ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
+                    {loading ? "Analyse OCR en cours..." : "Lancer l'OCR 🚀"}
+                  </button>
                 </div>
               )}
             </div>
+          )}
 
-            {error && <div className="mt-4 p-3 bg-red-50 text-red-600 border border-red-200 rounded-md text-sm">{error}</div>}
-            {successMessage && <div className="mt-4 p-3 bg-green-50 text-green-700 border border-green-200 rounded-md text-sm">{successMessage}</div>}
+          {/* Mode Lot : sélection multiple */}
+          {batchMode && canValidate && (
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+              <h2 className="text-2xl font-semibold text-gray-800 mb-2">📦 Traitement par lot</h2>
+              <p className="text-gray-600 mb-6">Sélectionnez plusieurs factures : un lot sera créé automatiquement et chaque fichier sera traité par l'OCR dans l'ordre.</p>
 
-            {file && (
-              <div className="mt-6 flex justify-end">
-                <button onClick={handleUpload} disabled={loading} className={`px-6 py-2.5 rounded-lg font-medium text-white transition-colors ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}`}>
-                  {loading ? "Analyse OCR en cours..." : "Lancer l'OCR 🚀"}
-                </button>
+              <input
+                type="file"
+                ref={batchFileInputRef}
+                onChange={handleBatchFilesChange}
+                accept="image/*,application/pdf"
+                multiple
+                className="hidden"
+              />
+
+              <div
+                onClick={() => batchFileInputRef.current.click()}
+                className="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer border-gray-300 hover:border-purple-500 hover:bg-purple-50/10 transition-all"
+              >
+                <div className="text-4xl mb-2">📚</div>
+                <p className="text-gray-600 font-medium">Cliquez pour sélectionner plusieurs fichiers</p>
+                <p className="text-xs text-gray-400">Images ou PDF — sélection multiple possible</p>
               </div>
-            )}
-          </div>
 
-          {/* Résultats avec Export */}
-          {extractedText && (
+              {batchFiles.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm font-semibold text-gray-700">{batchFiles.length} fichier(s) sélectionné(s) :</p>
+                  {batchFiles.map((f, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded-md border border-gray-100">
+                      <span className="text-sm text-gray-600 truncate">{f.name}</span>
+                      <button onClick={() => removeBatchFile(idx)} className="text-xs text-red-500 hover:text-red-700 ml-2">
+                        Retirer
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {batchError && <div className="mt-4 p-3 bg-red-50 text-red-600 border border-red-200 rounded-md text-sm">{batchError}</div>}
+
+              {batchFiles.length > 0 && (
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={handleProcessBatch}
+                    disabled={batchProcessing}
+                    className={`px-6 py-2.5 rounded-lg font-medium text-white transition-colors ${batchProcessing ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 shadow-sm'}`}
+                  >
+                    {batchProcessing
+                      ? `Traitement ${batchProgress.current}/${batchProgress.total}...`
+                      : `Lancer le traitement du lot (${batchFiles.length} fichiers) 🚀`}
+                  </button>
+                </div>
+              )}
+
+              {batchResults.length > 0 && (
+                <div className="mt-6 border-t pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      Résultat — {batchLotRef && <span className="text-purple-600">{batchLotRef}</span>}
+                    </h3>
+                    <button
+                      onClick={handleExportBatchExcel}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors"
+                    >
+                      📊 Exporter le lot en Excel
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {batchResults.map((r, idx) => (
+                      <div key={idx} className={`flex justify-between items-center p-3 rounded-lg border ${r.status === 'done' ? 'border-green-100 bg-green-50/30' : 'border-red-100 bg-red-50/30'}`}>
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">{r.filename}</p>
+                          {r.status === 'done' ? (
+                            <p className="text-xs text-gray-400">{r.structured_data?.provider} — {r.structured_data?.total_ttc}</p>
+                          ) : (
+                            <p className="text-xs text-red-500">{r.error_message}</p>
+                          )}
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${r.status === 'done' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {r.status === 'done' ? '✓ Traité' : '✗ Échec'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Résultats avec Export (mode facture unique) */}
+          {!batchMode && extractedText && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="border-b bg-gray-50 px-6 py-3 flex items-center justify-between">
                 <div className="flex space-x-4">
@@ -351,6 +591,38 @@ function Dashboard() {
                           className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
                           value={structuredData.date}
                           onChange={(e) => canEditFields && setStructuredData({...structuredData, date: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 uppercase">ICE</label>
+                        <input
+                          type="text"
+                          readOnly={!canEditFields}
+                          className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
+                          value={structuredData.ice}
+                          onChange={(e) => canEditFields && setStructuredData({...structuredData, ice: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 uppercase">IF</label>
+                        <input
+                          type="text"
+                          readOnly={!canEditFields}
+                          className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
+                          value={structuredData.if_number}
+                          onChange={(e) => canEditFields && setStructuredData({...structuredData, if_number: e.target.value})}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 uppercase">RC</label>
+                        <input
+                          type="text"
+                          readOnly={!canEditFields}
+                          className={`w-full mt-1 px-3 py-2 border rounded-lg font-medium focus:ring-2 focus:ring-blue-500/20 ${canEditFields ? 'text-gray-700 bg-white' : 'text-gray-500 bg-gray-50 cursor-not-allowed'}`}
+                          value={structuredData.rc}
+                          onChange={(e) => canEditFields && setStructuredData({...structuredData, rc: e.target.value})}
                         />
                       </div>
                     </div>
