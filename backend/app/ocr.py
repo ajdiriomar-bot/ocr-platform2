@@ -973,23 +973,35 @@ def assign_document_to_lot(
     document_id: int,
     payload: schemas.DocumentAssignLot,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(
-        auth.require_role(
-            "admin",
-            "comptable"
-        )
-    )
+    current_user: models.User = Depends(auth.get_current_user)
 ):
-    doc = (
+    document = (
         db.query(models.Document)
         .filter(models.Document.id == document_id)
         .first()
     )
 
-    if not doc:
+    if not document:
         raise HTTPException(
             status_code=404,
             detail="Document introuvable."
+        )
+
+    is_privileged = current_user.role.value in (
+        "admin",
+        "comptable"
+    )
+
+    # Un utilisateur simple ne peut manipuler que ses propres factures.
+    if (
+        not is_privileged
+        and document.user_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Vous ne pouvez modifier que vos propres documents."
+            )
         )
 
     if payload.lot_id is not None:
@@ -1005,9 +1017,23 @@ def assign_document_to_lot(
                 detail="Lot introuvable."
             )
 
-    doc.lot_id = payload.lot_id
+        # Un utilisateur simple ne peut rattacher une facture
+        # qu'à un lot qu'il a lui-même créé.
+        if (
+            not is_privileged
+            and lot.created_by_id != current_user.id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Vous ne pouvez utiliser que les lots "
+                    "que vous avez créés."
+                )
+            )
+
+    document.lot_id = payload.lot_id
 
     db.commit()
-    db.refresh(doc)
+    db.refresh(document)
 
-    return doc
+    return document
