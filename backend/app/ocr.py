@@ -3,13 +3,11 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from PIL import Image
-
 import io
 import re
 import traceback
-
 from .database import get_db
-from . import models, schemas, auth
+from . import models, schemas, auth,  notifications
 from .services.ice_verification import verify_ice
 
 
@@ -375,9 +373,7 @@ def extract_structured_fields(text: str):
 
         return None
 
-    # =========================================================
-    # FOURNISSEUR
-    # =========================================================
+    
 
     provider = None
 
@@ -488,9 +484,7 @@ def extract_structured_fields(text: str):
     if provider:
         data["provider"] = provider[:100]
 
-    # =========================================================
-    # CLIENT
-    # =========================================================
+   
 
     client = None
 
@@ -559,9 +553,7 @@ def extract_structured_fields(text: str):
     if client:
         data["client"] = client[:100]
 
-    # =========================================================
-    # DATE
-    # =========================================================
+   
 
     date_patterns = [
         r"(?:date\s*(?:de\s*)?(?:facture)?"
@@ -588,9 +580,7 @@ def extract_structured_fields(text: str):
             data["date"] = date_match.group(1)
             break
 
-    # =========================================================
-    # ICE
-    # =========================================================
+  
 
     ice = extract_identifier([
         r"\bI\s*\.?\s*C\s*\.?\s*E\s*\.?"
@@ -606,9 +596,7 @@ def extract_structured_fields(text: str):
     if ice:
         data["ice"] = ice
 
-    # =========================================================
-    # IF
-    # =========================================================
+   
 
     if_number = extract_identifier([
         r"\bI\s*\.?\s*F\s*\.?"
@@ -624,9 +612,7 @@ def extract_structured_fields(text: str):
     if if_number:
         data["if_number"] = if_number
 
-    # =========================================================
-    # RC
-    # =========================================================
+  
 
     rc = extract_identifier([
         r"\bR\s*\.?\s*C\s*\.?\s*"
@@ -642,9 +628,7 @@ def extract_structured_fields(text: str):
     if rc:
         data["rc"] = rc
 
-    # =========================================================
-    # MONTANTS
-    # =========================================================
+    
 
     total_ht = find_amount_near_label(
         r"^\s*total\s+h\.?\s*t\.?\s*$"
@@ -676,9 +660,7 @@ def extract_structured_fields(text: str):
     if total_ttc:
         data["total_ttc"] = total_ttc
 
-    # =========================================================
-    # VÉRIFICATION MATHÉMATIQUE
-    # =========================================================
+    
 
     ht_value = amount_to_decimal(
         data["total_ht"]
@@ -854,6 +836,28 @@ async def extract_text(
         db.commit()
         db.refresh(db_document)
 
+        
+        if current_user.role == models.UserRole.user:
+            notifications.create_notifications_for_roles(
+                db=db,
+                roles=[
+                    models.UserRole.admin,
+                    models.UserRole.comptable
+                ],
+                title="Nouvelle facture à valider",
+                message=(
+                    f"{current_user.first_name} "
+                    f"{current_user.last_name} a extrait "
+                    f"la facture {db_document.filename}. "
+                    "Elle doit être vérifiée et validée."
+                ),
+                notification_type=(
+                    "invoice_to_validate"
+                ),
+                related_user_id=current_user.id,
+                document_id=db_document.id
+            )
+
         return {
             "id": db_document.id,
             "filename": db_document.filename,
@@ -992,7 +996,6 @@ def assign_document_to_lot(
         "comptable"
     )
 
-    # Un utilisateur simple ne peut manipuler que ses propres factures.
     if (
         not is_privileged
         and document.user_id != current_user.id
@@ -1017,8 +1020,6 @@ def assign_document_to_lot(
                 detail="Lot introuvable."
             )
 
-        # Un utilisateur simple ne peut rattacher une facture
-        # qu'à un lot qu'il a lui-même créé.
         if (
             not is_privileged
             and lot.created_by_id != current_user.id

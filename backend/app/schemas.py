@@ -3,9 +3,7 @@ from datetime import datetime
 from .models import UserRole, AccountStatus
 
 
-# =========================================================
-# USERS
-# =========================================================
+
 
 class UserCreate(BaseModel):
     first_name: str
@@ -36,9 +34,7 @@ class UserStatusUpdate(BaseModel):
     status: AccountStatus
 
 
-# =========================================================
-# DOCUMENTS
-# =========================================================
+
 
 class DocumentBase(BaseModel):
     filename: str
@@ -69,9 +65,7 @@ class Document(BaseModel):
     tva: str | None = None
     total_ttc: str | None = None
 
-    # ================================
-    # Vérification ICE
-    # ================================
+    
 
     ice_verification_status: str
     verified_company_name: str | None = None
@@ -106,10 +100,19 @@ class DocumentValidate(BaseModel):
 class DocumentAssignLot(BaseModel):
     lot_id: int | None
 
+class Notification(BaseModel):
+    id: int
+    title: str
+    message: str
+    notification_type: str
+    is_read: bool
+    created_at: datetime
+    related_user_id: int | None = None
+    document_id: int | None = None
 
-# =========================================================
-# LOTS
-# =========================================================
+    class Config:
+        from_attributes = True
+
 
 class LotCreate(BaseModel):
     reference: str | None = None

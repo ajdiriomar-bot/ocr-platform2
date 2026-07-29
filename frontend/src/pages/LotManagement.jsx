@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import NotificationBell from '../components/NotificationBell';
 
 const toEditableDocument = (document) => ({
   id: document.id,
@@ -378,7 +379,8 @@ function LotManagement() {
             <h1 className="text-xl font-bold text-blue-600">
               OCR Accounting Platform 🚀
             </h1>
-
+           <div className="flex items-center gap-3">
+            <NotificationBell />
             <button
               onClick={() =>
                 navigate('/dashboard')
@@ -393,8 +395,9 @@ function LotManagement() {
               ← Retour au tableau de bord
             </button>
           </div>
-        </div>
-      </nav>
+       </div>
+    </div>
+  </nav>
 
       <main
         className="

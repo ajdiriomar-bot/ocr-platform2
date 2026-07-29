@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api from '../api';
+import NotificationBell from '../components/NotificationBell';
 
 const EMPTY_STRUCTURED_DATA = {
   provider: 'Non détecté',
@@ -647,6 +648,7 @@ function Dashboard() {
             </h1>
 
             <div className="flex items-center gap-3">
+              <NotificationBell />
               {canValidate && (
                 <button
                   onClick={() => navigate('/lots')}

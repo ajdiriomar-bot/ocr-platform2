@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import NotificationBell from '../components/NotificationBell';
 
 function UserManagement() {
   const navigate = useNavigate();
@@ -98,6 +99,7 @@ function UserManagement() {
           <div className="flex justify-between h-16 items-center">
             <h1 className="text-xl font-bold text-blue-600">OCR Accounting Platform 🚀</h1>
             <div className="flex gap-3">
+              <NotificationBell />
               <button
                 onClick={() => navigate('/dashboard')}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"

@@ -82,6 +82,15 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
+    notifications = relationship(
+        "Notification",
+        foreign_keys="[Notification.recipient_id]",
+        back_populates="recipient",
+        cascade="all, delete-orphan"
+    )
+
+
+
 
 class Lot(Base):
     __tablename__ = "lots"
@@ -118,6 +127,8 @@ class Lot(Base):
         "Document",
         back_populates="lot"
     )
+
+    
 
 
 class Document(Base):
@@ -269,4 +280,75 @@ class Document(Base):
     lot = relationship(
         "Lot",
         back_populates="documents"
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    recipient_id = Column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    title = Column(
+        String(255),
+        nullable=False
+    )
+
+    message = Column(
+        String(500),
+        nullable=False
+    )
+
+    notification_type = Column(
+        String(50),
+        nullable=False
+    )
+
+    is_read = Column(
+        Boolean,
+        default=False,
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    related_user_id = Column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL"
+        ),
+        nullable=True
+    )
+
+    document_id = Column(
+        Integer,
+        ForeignKey(
+            "documents.id",
+            ondelete="SET NULL"
+        ),
+        nullable=True
+    )
+
+    recipient = relationship(
+        "User",
+        foreign_keys=[recipient_id],
+        back_populates="notifications"
     )

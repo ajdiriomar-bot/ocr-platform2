@@ -7,7 +7,7 @@ from datetime import timedelta
 from .auth import create_access_token, get_current_user, require_role
 from fastapi.middleware.cors import CORSMiddleware
 from . import ocr
-from . import ocr, lots
+from . import ocr, lots, notifications
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -15,6 +15,7 @@ app = FastAPI()
 
 app.include_router(ocr.router)
 app.include_router(lots.router)
+app.include_router(notifications.router)
 
 
 origins = [
@@ -36,14 +37,52 @@ app.add_middleware(
 def read_root():
     return {"message": "OCR Platform est opérationnel"}
 
-@app.post("/register", response_model=schemas.User)
-def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_email(db, email=user.email)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email déjà enregistré")
+@app.post(
+    "/register",
+    response_model=schemas.User
+)
+def register_user(
+    user: schemas.UserCreate,
+    db: Session = Depends(get_db)
+):
+    existing_user = crud.get_user_by_email(
+        db,
+        email=user.email
+    )
 
-    hashed_password = auth.get_password_hash(user.password)
-    return crud.create_user(db, user, hashed_password)
+    if existing_user:
+        raise HTTPException(
+            status_code=400,
+            detail="Email déjà enregistré"
+        )
+
+    hashed_password = auth.get_password_hash(
+        user.password
+    )
+
+    created_user = crud.create_user(
+        db,
+        user,
+        hashed_password
+    )
+
+    notifications.create_notifications_for_roles(
+        db=db,
+        roles=[
+            models.UserRole.admin
+        ],
+        title="Nouveau compte en attente",
+        message=(
+            f"{created_user.first_name} "
+            f"{created_user.last_name} vient de "
+            f"créer le compte {created_user.email}. "
+            "Le compte doit être vérifié et activé."
+        ),
+        notification_type="new_account",
+        related_user_id=created_user.id
+    )
+
+    return created_user
 
 @app.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
