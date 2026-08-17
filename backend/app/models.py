@@ -169,7 +169,25 @@ class Document(Base):
         String,
         nullable=True
     )
+    invoice_number = Column(
+        String(100),
+        nullable=True
+    )
 
+    client_ice = Column(
+        String(30),
+        nullable=True
+    )
+
+    tva_percentage = Column(
+        String(50),
+        nullable=True
+    )
+
+    cnss = Column(
+        String(30),
+        nullable=True
+    )
     ice = Column(
         String,
         nullable=True

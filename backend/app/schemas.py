@@ -56,6 +56,10 @@ class Document(BaseModel):
     provider: str | None = None
     client: str | None = None
     invoice_date: str | None = None
+    invoice_number: str | None = None
+    client_ice: str | None = None
+    tva_percentage: str | None = None
+    cnss: str | None = None
 
     ice: str | None = None
     if_number: str | None = None
@@ -89,9 +93,21 @@ class DocumentValidate(BaseModel):
     provider: str
     client: str
     date: str
+
+    invoice_number: str = "Non détecté"
+
+    # ICE fournisseur
     ice: str
+
+    # ICE client
+    client_ice: str = "Non détecté"
+
     if_number: str
     rc: str
+    cnss: str = "Non détecté"
+
+    tva_percentage: str = "Non détecté"
+
     total_ht: str
     tva: str
     total_ttc: str
