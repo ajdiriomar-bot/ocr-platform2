@@ -16,12 +16,12 @@ MISSING_DATE = "Non détectée"
 
 CLIENT_LABELS = [
     r"NOM\s+DU\s+CLIENT",
-    r"CLIENT",
+    r"CL[IL]ENT",
     r"DESTINATAIRE",
     r"ADRESSE\s+DE\s+FACTURATION",
     r"ADRESSE\s+FACTURATION",
     r"ADRESSE\s+A",
-    r"FACTURE\s+A",
+    r"FACTURE\s+A(?!\s+LA\s+SOMME)",
     r"ACHETEUR",
     r"CUSTOMER",
     r"BILL\s+TO",
@@ -49,7 +49,7 @@ CLIENT_STRONG_LABELS = [
     r"ADRESSE\s+DE\s+FACTURATION",
     r"ADRESSE\s+FACTURATION",
     r"ADRESSE\s+A",
-    r"FACTURE\s+A",
+    r"FACTURE\s+A(?!\s+LA\s+SOMME)",
     r"ACHETEUR",
     r"CUSTOMER",
     r"BILL\s+TO",
@@ -70,9 +70,15 @@ ENTITY_COMPANY_MARKERS = (
     r"\b(?:"
     r"SARL|S\.?A\.?R\.?L\.?|SA|S\.?A\.?|SAS|SASU|EURL|"
     r"SOCIETE|ETABLISSEMENT|ETS\.?|ENTREPRISE|COMPANY|"
-    r"HOSPITALITY|SOLUTIONS|TELECOM|SERVICES|INDUSTRIE|"
-    r"DISTRIBUTION|COMMERCE|GROUP|GROUPE"
+    r"HOSPITALITY|SOLUTIONS|TELECOM|GROUP|GROUPE"
     r")\b"
+    r"|"
+    # DISTRIBUTION/COMMERCE/SERVICES/INDUSTRIE sont souvent employés
+    # de façon descriptive ("distribution de pièces...", "commerce
+    # de gros") plutôt que comme suffixe de raison sociale ("XYZ
+    # Distribution"). On ne les compte comme marqueur d'entreprise
+    # que lorsqu'ils ne sont PAS suivis de "DE".
+    r"\b(?:DISTRIBUTION|COMMERCE|SERVICES|INDUSTRIE)\b(?!\s+DE\b)"
 )
 
 
@@ -120,6 +126,39 @@ def _matches(
             re.IGNORECASE
         )
         for pattern in patterns
+    )
+
+
+# Lettres OCR fréquemment confondues avec des chiffres. N'est utilisé
+# que pour les identifiants légaux marocains (RC/IF/CNSS/ICE), qui
+# sont toujours purement numériques — pas pour les noms d'entreprise
+# ou autres champs textuels, où ces lettres sont légitimes.
+_OCR_DIGIT_LOOKALIKES = str.maketrans(
+    {
+        "O": "0",
+        "o": "0",
+        "I": "1",
+        "l": "1",
+        "S": "5",
+        "s": "5",
+        "B": "8",
+        "Z": "2",
+        "z": "2",
+    }
+)
+
+
+def _digitize_ocr_value(value: str) -> str:
+    """
+    Convertit un fragment de texte OCR en chiffres, en corrigeant
+    d'abord les confusions lettre/chiffre courantes (ex. "S645687"
+    -> "5645687") avant de retirer tout caractère non numérique
+    restant.
+    """
+    return re.sub(
+        r"\D",
+        "",
+        (value or "").translate(_OCR_DIGIT_LOOKALIKES)
     )
 
 
@@ -524,7 +563,7 @@ def _entity_ok(
             r"\b(?:"
             r"FACTURE|INVOICE|DATE|ICE|IF|RC|CNSS|"
             r"TOTAL|TVA|TTC|HT|TELEPHONE|TEL|EMAIL|"
-            r"PAGE|RIB|BANQUE|PATENTE|"
+            r"PAGE|RIB|BANQUE|PATENTE|REFERENCE|"
             r"CONTACT\s+CLIENT|CODE\s+CLIENT|REFERENCE\s+CLIENT|"
             r"DESTINATAIRE|ADRESSE\s+DE\s+FACTURATION|"
             r"ADRESSE\s+A|EMIS\s+PAR|EMETTEUR|FOURNISSEUR|"
@@ -596,7 +635,7 @@ def _client_anchor(
         ):
             priority = 300
         elif re.search(
-            r"\bCLIENT\b",
+            r"\bCL[IL]ENT\b",
             normalized
         ):
             priority = 120
@@ -931,7 +970,7 @@ def extract_entities(
             ):
                 priority = 200
             elif re.search(
-                r"\bCLIENT\b",
+                r"\bCL[IL]ENT\b",
                 normalized
             ):
                 priority = 80
@@ -998,26 +1037,89 @@ def extract_entities(
             ):
                 continue
 
-            score = 0
+            # Un nom d'entreprise ne contient (quasiment) jamais de
+            # chiffres, contrairement aux numéros de référence, de
+            # BL, de facture ou aux dates (ex. "BL N° : 001617/2025").
+            if re.search(
+                r"\d",
+                item["text"]
+            ):
+                continue
+
             normalized = item["n"]
 
+            # Filtre les fragments OCR trop courts (ex. bribe de logo
+            # comme "space" au lieu de "Espace Caoutchouc &
+            # Transmission") qui ne portent aucun signal de raison
+            # sociale. Un vrai nom d'entreprise contient soit un
+            # espace (plusieurs mots), soit un marqueur reconnu.
+            if (
+                " " not in item["text"]
+                and len(item["text"]) < 8
+                and not re.search(
+                    ENTITY_COMPANY_MARKERS,
+                    normalized
+                )
+            ):
+                continue
+
+            score = 0
+            debug_parts = []
+
             if item["y"] < 0.38:
-                score += 35
+                # Bonus proportionnel plutôt que binaire : plus l'élément
+                # est haut dans la page, plus le score augmente. Cela
+                # départage naturellement le vrai nom de l'entreprise
+                # (généralement tout en haut) d'un sous-titre/slogan
+                # situé juste en dessous, quand aucun autre signal ne
+                # permet de trancher.
+                bonus = 35 + int(
+                    (0.38 - item["y"]) * 100
+                )
+                score += bonus
+                debug_parts.append(
+                    f"y_top(y={item['y']:.4f})=+{bonus}"
+                )
 
             if item["y"] > 0.82:
                 score += 20
+                debug_parts.append("y_bottom=+20")
+
+            # Un vrai nom d'entreprise complet contient généralement
+            # plusieurs mots ; les bribes OCR de logo (ex. "space",
+            # "cdoutchouc", "& transmission") sont soit un seul mot,
+            # soit un fragment partiel plus court que le nom complet.
+            # Le bonus croît avec le nombre de mots afin que le nom
+            # complet l'emporte nettement sur n'importe quelle bribe
+            # partielle du même logo, quelle que soit sa position.
+            word_count = len(
+                item["text"].split()
+            )
+            if word_count > 1:
+                bonus = 20 * min(
+                    word_count,
+                    5
+                )
+                score += bonus
+                debug_parts.append(
+                    f"word_count({word_count})=+{bonus}"
+                )
 
             if re.search(
                 ENTITY_COMPANY_MARKERS,
                 normalized
             ):
                 score += 50
+                debug_parts.append("marker=+50")
 
             if counts.get(
                 norm(item["text"]),
                 1
             ) > 1:
                 score += 30
+                debug_parts.append(
+                    f"repeat(count={counts.get(norm(item['text']))})=+30"
+                )
 
             if re.search(
                 (
@@ -1031,6 +1133,7 @@ def extract_entities(
                 normalized
             ):
                 score -= 100
+                debug_parts.append("client_keyword=-100")
 
             if (
                 client_anchor
@@ -1046,6 +1149,7 @@ def extract_entities(
                 ) < 0.18
             ):
                 score -= 90
+                debug_parts.append("client_zone=-90")
 
             if (
                 client
@@ -1054,11 +1158,13 @@ def extract_entities(
                 ) == norm(client)
             ):
                 score -= 150
+                debug_parts.append("equals_client=-150")
 
             candidates.append(
                 (
                     score,
-                    item["text"]
+                    item["text"],
+                    debug_parts
                 )
             )
 
@@ -1067,6 +1173,14 @@ def extract_entities(
             key=lambda item:
                 item[0]
         )
+
+        # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
+        for score_dbg, text_dbg, parts_dbg in candidates[:8]:
+            print(
+                f"[DEBUG FOURNISSEUR] score={score_dbg}  "
+                f"text={text_dbg!r}  détail={parts_dbg}"
+            )
+        # --- FIN DEBUG ---
 
         if (
             candidates
@@ -1236,10 +1350,12 @@ def detect_invoice_reference(
         ),
     ]
 
-    for line in (
+    raw_lines = (
         text
         or ""
-    ).splitlines()[:40]:
+    ).splitlines()[:40]
+
+    for line in raw_lines:
 
         normalized = norm(line)
 
@@ -1258,6 +1374,47 @@ def detect_invoice_reference(
                         " .,:;-"
                     )
                 )
+
+    # Fallback : libellé "Numéro" (ou variantes) seul sur sa ligne,
+    # valeur trouvée quelques lignes plus bas — cas des tableaux OCR
+    # où le libellé et la valeur sont sur des blocs séparés, ex. :
+    #   Numéro
+    #   Date
+    #   Cllent
+    #
+    #   001614/2025
+    #   EJ SOLUTIONS
+    # N'est utilisé que si aucun des patterns ci-dessus n'a matché,
+    # donc les formats déjà reconnus (FA1905-0002, 0005/2019, ...)
+    # continuent de passer par les patterns existants.
+    standalone_label = re.compile(
+        r"^(?:NUMERO|N[°ºO]\.?\s*(?:DE\s+)?(?:LA\s+)?FACTURE)$"
+    )
+
+    for index, line in enumerate(raw_lines):
+
+        normalized = norm(clean(line))
+
+        if not standalone_label.match(normalized):
+            continue
+
+        for candidate in raw_lines[index + 1:index + 8]:
+
+            candidate_clean = clean(candidate)
+
+            if not candidate_clean:
+                continue
+
+            if not re.search(r"\d", candidate_clean):
+                continue
+
+            if re.fullmatch(
+                r"[A-Z0-9][A-Z0-9./_\-]{2,}",
+                norm(candidate_clean)
+            ):
+                return candidate_clean.strip(" .,:;-")
+
+        break
 
     return None
 
@@ -1361,14 +1518,14 @@ def identifier_candidates(
 
     config = {
         "ice": (
-            r"I\s*\.?\s*C\s*\.?\s*E\s*\.?",
+            r"[I1]\s*\.?\s*C\s*\.?\s*E\s*\.?",
             15,
             15
         ),
 
         "if": (
             (
-                r"I\s*\.?\s*F\s*\.?"
+                r"[I1]\s*\.?\s*F\s*\.?"
                 r"|IDENTIFIANT\s+FISCAL"
             ),
             5,
@@ -1411,7 +1568,8 @@ def identifier_candidates(
             (
                 rf"(?:{label})"
                 rf"\s*[:#Nn°º.\-]?\s*"
-                rf"([0-9][0-9 .\-]{{0,24}})"
+                rf"([0-9OoIlSsBbZz]"
+                rf"[0-9 .OoIlSsBbZz]{{0,24}})"
             ),
             item["text"],
             re.IGNORECASE
@@ -1419,9 +1577,7 @@ def identifier_candidates(
 
         if match:
 
-            value = re.sub(
-                r"\D",
-                "",
+            value = _digitize_ocr_value(
                 match.group(1)
             )
 
@@ -1614,7 +1770,7 @@ def _id_score(
     client_context = bool(
         re.search(
             (
-                r"CLIENT|NOM DU CLIENT|"
+                r"CL[IL]ENT|NOM DU CLIENT|"
                 r"DESTINATAIRE|ADRESSE DE FACTURATION|"
                 r"CUSTOMER|BILL TO"
             ),
@@ -1699,13 +1855,13 @@ def _identifier_candidates_from_lines(
 
     config = {
         "ice": (
-            r"I\s*\.?\s*C\s*\.?\s*E\s*\.?",
+            r"[I1]\s*\.?\s*C\s*\.?\s*E\s*\.?",
             15,
             15
         ),
         "if": (
             (
-                r"I\s*\.?\s*F\s*\.?"
+                r"[I1]\s*\.?\s*F\s*\.?"
                 r"|IDENTIFIANT\s+FISCAL"
             ),
             5,
@@ -1748,15 +1904,14 @@ def _identifier_candidates_from_lines(
             (
                 rf"(?:{label})"
                 rf"\s*[:#Nn°º.\-]?\s*"
-                rf"([0-9][0-9 .\-]{{0,24}})"
+                rf"([0-9OoIlSsBbZz]"
+                rf"[0-9 .OoIlSsBbZz]{{0,24}})"
             ),
             line["text"],
             re.IGNORECASE
         ):
 
-            value = re.sub(
-                r"\D",
-                "",
+            value = _digitize_ocr_value(
                 match.group(1)
             )
 
@@ -1776,9 +1931,7 @@ def _identifier_candidates_from_lines(
                 "items",
                 []
             ):
-                digits = re.sub(
-                    r"\D",
-                    "",
+                digits = _digitize_ocr_value(
                     item["text"]
                 )
 
