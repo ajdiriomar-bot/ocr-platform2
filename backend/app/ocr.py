@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -2703,13 +2703,50 @@ def get_user_history(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(
         auth.get_current_user
-    )
+    ),
+    sort_by: str | None = Query(
+        None,
+        description=(
+            "Champ de tri : 'provider', 'client', "
+            "ou par défaut la date"
+        )
+    ),
+    order: str = Query(
+        "desc",
+        description="'asc' ou 'desc'"
+    ),
 ):
+    # =====================================================
+    # CHAMP DE TRI
+    # =====================================================
+
+    sortable_fields = {
+        "provider": models.Document.provider,
+        "client": models.Document.client,
+    }
+
+    sort_column = sortable_fields.get(
+        sort_by,
+        models.Document.created_at
+    )
+
+    # Un tri secondaire par date garde un ordre stable
+    # entre les documents qui partagent le même
+    # fournisseur/client.
+    if order == "asc":
+        ordering = (
+            sort_column.asc(),
+            models.Document.created_at.desc(),
+        )
+    else:
+        ordering = (
+            sort_column.desc(),
+            models.Document.created_at.desc(),
+        )
+
     query = db.query(
         models.Document
-    ).order_by(
-        models.Document.created_at.desc()
-    )
+    ).order_by(*ordering)
 
     if current_user.role.value in (
         "admin",

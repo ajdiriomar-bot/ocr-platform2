@@ -1105,6 +1105,16 @@ def extract_entities(
                     f"word_count({word_count})=+{bonus}"
                 )
 
+            # Un vrai nom d'entreprise est court ; un slogan ou une
+            # description ("Importation et distribution de pièces
+            # de transmission industrielle...") est en général
+            # bien plus long qu'une raison sociale, même quand
+            # celle-ci a plusieurs mots. Ce signal départage les
+            # deux de façon plus fiable que le seul nombre de mots.
+            if len(item["text"]) > 50:
+                score -= 60
+                debug_parts.append("too_long=-60")
+
             if re.search(
                 ENTITY_COMPANY_MARKERS,
                 normalized
@@ -1139,6 +1149,16 @@ def extract_entities(
                 client_anchor
                 and item["page"]
                 == client_anchor["page"]
+                # Un titre de page (logo, raison sociale en
+                # en-tête) est toujours nettement AU-DESSUS du
+                # tableau d'informations facture où se trouve
+                # l'ancre client — jamais à côté ni dedans. On
+                # exclut donc les éléments situés bien plus haut
+                # que l'ancre, pour éviter qu'un texte large dont
+                # le centre tombe par coïncidence dans la marge
+                # de tolérance X soit pénalisé à tort.
+                and item["y"]
+                >= client_anchor["y"] - 0.05
                 and abs(
                     item["x"]
                     - client_anchor["x"]

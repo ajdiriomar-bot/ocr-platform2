@@ -264,6 +264,8 @@ function Dashboard() {
 
   const [history, setHistory] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc');
   const [userRole, setUserRole] = useState(null);
 
   const [currentDocId, setCurrentDocId] = useState(null);
@@ -296,13 +298,30 @@ function Dashboard() {
     }
   };
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (
+    currentSortBy = sortBy,
+    currentSortOrder = sortOrder,
+  ) => {
     try {
-      const response = await api.get('/ocr/history');
+      const response = await api.get('/ocr/history', {
+        params: {
+          sort_by: currentSortBy,
+          order: currentSortOrder,
+        },
+      });
       setHistory(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error("Erreur lors de la récupération de l'historique :", error);
     }
+  };
+
+  const handleSortChange = (field) => {
+    const nextOrder =
+      sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc';
+
+    setSortBy(field);
+    setSortOrder(nextOrder);
+    fetchHistory(field, nextOrder);
   };
 
   const handleLogout = () => {
@@ -1411,6 +1430,31 @@ function Dashboard() {
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
+
+            <div className="flex gap-2 mt-2">
+              {[
+                { field: 'created_at', label: 'Date' },
+                { field: 'provider', label: 'Fournisseur' },
+                { field: 'client', label: 'Client' },
+              ].map(({ field, label }) => (
+                <button
+                  key={field}
+                  type="button"
+                  onClick={() => handleSortChange(field)}
+                  className={`
+                    px-2.5 py-1 rounded-md text-xs font-medium border transition-colors
+                    ${
+                      sortBy === field
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                    }
+                  `}
+                >
+                  {label}
+                  {sortBy === field && (sortOrder === 'asc' ? ' ↑' : ' ↓')}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-3 pr-1">
