@@ -1064,7 +1064,6 @@ def extract_entities(
                 continue
 
             score = 0
-            debug_parts = []
 
             if item["y"] < 0.38:
                 # Bonus proportionnel plutôt que binaire : plus l'élément
@@ -1073,17 +1072,12 @@ def extract_entities(
                 # (généralement tout en haut) d'un sous-titre/slogan
                 # situé juste en dessous, quand aucun autre signal ne
                 # permet de trancher.
-                bonus = 35 + int(
+                score += 35 + int(
                     (0.38 - item["y"]) * 100
-                )
-                score += bonus
-                debug_parts.append(
-                    f"y_top(y={item['y']:.4f})=+{bonus}"
                 )
 
             if item["y"] > 0.82:
                 score += 20
-                debug_parts.append("y_bottom=+20")
 
             # Un vrai nom d'entreprise complet contient généralement
             # plusieurs mots ; les bribes OCR de logo (ex. "space",
@@ -1096,13 +1090,9 @@ def extract_entities(
                 item["text"].split()
             )
             if word_count > 1:
-                bonus = 20 * min(
+                score += 20 * min(
                     word_count,
                     5
-                )
-                score += bonus
-                debug_parts.append(
-                    f"word_count({word_count})=+{bonus}"
                 )
 
             # Un vrai nom d'entreprise est court ; un slogan ou une
@@ -1113,23 +1103,18 @@ def extract_entities(
             # deux de façon plus fiable que le seul nombre de mots.
             if len(item["text"]) > 50:
                 score -= 60
-                debug_parts.append("too_long=-60")
 
             if re.search(
                 ENTITY_COMPANY_MARKERS,
                 normalized
             ):
                 score += 50
-                debug_parts.append("marker=+50")
 
             if counts.get(
                 norm(item["text"]),
                 1
             ) > 1:
                 score += 30
-                debug_parts.append(
-                    f"repeat(count={counts.get(norm(item['text']))})=+30"
-                )
 
             if re.search(
                 (
@@ -1143,7 +1128,6 @@ def extract_entities(
                 normalized
             ):
                 score -= 100
-                debug_parts.append("client_keyword=-100")
 
             if (
                 client_anchor
@@ -1169,7 +1153,6 @@ def extract_entities(
                 ) < 0.18
             ):
                 score -= 90
-                debug_parts.append("client_zone=-90")
 
             if (
                 client
@@ -1178,13 +1161,11 @@ def extract_entities(
                 ) == norm(client)
             ):
                 score -= 150
-                debug_parts.append("equals_client=-150")
 
             candidates.append(
                 (
                     score,
-                    item["text"],
-                    debug_parts
+                    item["text"]
                 )
             )
 
@@ -1193,14 +1174,6 @@ def extract_entities(
             key=lambda item:
                 item[0]
         )
-
-        # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
-        for score_dbg, text_dbg, parts_dbg in candidates[:8]:
-            print(
-                f"[DEBUG FOURNISSEUR] score={score_dbg}  "
-                f"text={text_dbg!r}  détail={parts_dbg}"
-            )
-        # --- FIN DEBUG ---
 
         if (
             candidates
@@ -2201,10 +2174,26 @@ def extract_ids(
             reverse=True
         )
 
+        top_candidate = candidates[0]
+
+        # Une valeur qui ressemble à une date (DDMMYYYY) et qui n'a
+        # été retrouvée que par proximité (jamais explicitement
+        # étiquetée "IF"/"RC"/"CNSS" sur le document) est presque
+        # toujours une date de facture ou de paiement mal captée en
+        # l'absence du vrai numéro — mieux vaut "Non détecté" qu'un
+        # identifiant clairement faux.
+        if (
+            top_candidate.get("source") == "neighbor"
+            and _looks_like_compact_date_digits(
+                top_candidate["value"]
+            )
+        ):
+            continue
+
         # Les sources "inline" et "line" sont privilégiées par
         # _id_score. Cela empêche une date/quantité proche du libellé
         # d'être choisie devant un identifiant réellement étiqueté.
-        result[key] = candidates[0]["value"]
+        result[key] = top_candidate["value"]
 
     return result
 
