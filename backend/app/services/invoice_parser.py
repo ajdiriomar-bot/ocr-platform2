@@ -64,6 +64,8 @@ CLIENT_EXCLUDED_LABELS = [
     r"IDENTIFIANT\s+CLIENT",
     r"NUMERO\s+CLIENT",
     r"N[°ºO]\s*CLIENT",
+    r"CATEGORIE\s+CLIENT",
+    r"CLIENT\s+AU\s+\w+",
 ]
 
 ENTITY_COMPANY_MARKERS = (
@@ -562,13 +564,21 @@ def _entity_ok(
         (
             r"\b(?:"
             r"FACTURE|INVOICE|DATE|ICE|IF|RC|CNSS|"
-            r"TOTAL|TVA|TTC|HT|TELEPHONE|TEL|EMAIL|"
+            r"TELEPHONE|TEL|EMAIL|"
             r"PAGE|RIB|BANQUE|PATENTE|REFERENCE|"
+            r"PRIX|UNITAIRE|DESIGNATION|QUANTITE|QTE|"
+            r"REM|NET|MODE\s+REGLEMENT|"
             r"CONTACT\s+CLIENT|CODE\s+CLIENT|REFERENCE\s+CLIENT|"
             r"DESTINATAIRE|ADRESSE\s+DE\s+FACTURATION|"
             r"ADRESSE\s+A|EMIS\s+PAR|EMETTEUR|FOURNISSEUR|"
             r"VENDEUR|RAISON\s+SOCIALE"
             r")\b"
+            # TOTAL/TVA/TTC/HT tolérants aux points OCR
+            # (ex. "H.T." ne matche pas \bHT\b).
+            r"|TOTAL"
+            r"|T\s*\.?\s*V\s*\.?\s*A\s*\.?"
+            r"|T\s*\.?\s*T\s*\.?\s*C\s*\.?"
+            r"|\bH\s*\.?\s*T\s*\.?\b"
         ),
         normalized
     ):
@@ -641,6 +651,15 @@ def _client_anchor(
             priority = 120
 
         if priority <= 0:
+            continue
+
+        # Un vrai libellé (ex. "Destinataire :", "Client") est
+        # toujours court. Si le mot déclencheur apparaît au milieu
+        # d'une phrase longue (ex. "...aux risques et périls du
+        # destinataire." dans des conditions de vente), ce n'est
+        # jamais une ancre client valide — on l'ignore entièrement,
+        # plutôt que de simplement lui retirer un bonus.
+        if len(normalized) > 40:
             continue
 
         # Les libellés courts et explicites sont plus fiables.
@@ -935,6 +954,25 @@ def extract_entities(
         items
     )
 
+    # Certains fournisseurs (ex. Sérima) n'ont aucun libellé
+    # "Client"/"Destinataire" exploitable pour le bloc client
+    # (mise en page en colonnes entrelacées par l'OCR), mais ont
+    # un libellé explicite et non ambigu "Votre Code ICE" juste
+    # après ce bloc. On le repère ici pour servir de repère de
+    # secours, aussi bien pour EXCLURE ce bloc des candidats
+    # fournisseur que pour y chercher activement le client.
+    votre_code_item = next(
+        (
+            item
+            for item in items
+            if re.search(
+                r"VOTRE\s+CODE",
+                item["n"]
+            )
+        ),
+        None
+    )
+
     client = _near_entity(
         items,
         client_anchor,
@@ -948,6 +986,25 @@ def extract_entities(
         PROVIDER_LABELS,
         "provider"
     )
+
+    # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
+    print(
+        "[DEBUG CLIENT] anchor="
+        + repr(
+            client_anchor["text"]
+            if client_anchor else None
+        )
+        + f"  near_entity_result={client!r}"
+    )
+    print(
+        "[DEBUG PROVIDER] anchor="
+        + repr(
+            provider_anchor["text"]
+            if provider_anchor else None
+        )
+        + f"  near_entity_result={provider!r}"
+    )
+    # --- FIN DEBUG ---
 
     # Fallback client basé sur les lignes reconstruites.
     if not client:
@@ -976,6 +1033,12 @@ def extract_entities(
                 priority = 80
 
             if priority <= 0:
+                continue
+
+            # Même garde que pour l'ancre principale : un vrai
+            # libellé est court, jamais une phrase de conditions
+            # de vente contenant incidemment "destinataire".
+            if len(normalized) > 40:
                 continue
 
             inline = _inline_entity(
@@ -1046,13 +1109,40 @@ def extract_entities(
             ):
                 continue
 
+            # Un élément situé juste au-dessus de "Votre Code ICE",
+            # dans la MÊME colonne (même X), fait partie du bloc
+            # client, jamais du fournisseur — même en l'absence de
+            # tout libellé "Client" exploitable. La contrainte X
+            # évite d'exclure à tort un élément de la colonne de
+            # gauche (infos facture) qui partage juste la même
+            # hauteur par coïncidence de mise en page.
+            if (
+                votre_code_item
+                and item["page"]
+                == votre_code_item["page"]
+                and 0
+                <= (
+                    votre_code_item["y"]
+                    - item["y"]
+                )
+                <= 0.15
+                and abs(
+                    item["x"]
+                    - votre_code_item["x"]
+                ) < 0.35
+            ):
+                continue
+
             normalized = item["n"]
 
             # Filtre les fragments OCR trop courts (ex. bribe de logo
             # comme "space" au lieu de "Espace Caoutchouc &
             # Transmission") qui ne portent aucun signal de raison
             # sociale. Un vrai nom d'entreprise contient soit un
-            # espace (plusieurs mots), soit un marqueur reconnu.
+            # espace (plusieurs mots), soit un marqueur reconnu, soit
+            # se répète plusieurs fois dans le document (un nom de
+            # marque court comme "Sérima" revient dans l'en-tête, les
+            # tampons et le pied de page — une bribe OCR isolée non).
             if (
                 " " not in item["text"]
                 and len(item["text"]) < 8
@@ -1060,6 +1150,10 @@ def extract_entities(
                     ENTITY_COMPANY_MARKERS,
                     normalized
                 )
+                and counts.get(
+                    norm(item["text"]),
+                    1
+                ) <= 1
             ):
                 continue
 
@@ -1101,12 +1195,22 @@ def extract_entities(
             # bien plus long qu'une raison sociale, même quand
             # celle-ci a plusieurs mots. Ce signal départage les
             # deux de façon plus fiable que le seul nombre de mots.
-            if len(item["text"]) > 50:
+            is_too_long = len(item["text"]) > 50
+
+            if is_too_long:
                 score -= 60
 
-            if re.search(
-                ENTITY_COMPANY_MARKERS,
-                normalized
+            # Le bonus de marqueur ("SARL", "SOCIETE", ...) récompense
+            # un nom d'entreprise concis, pas une phrase descriptive
+            # qui contient incidemment ce mot (ex. "Société d'Etudes
+            # et de Représentations Industrielles au Maroc"). On ne
+            # l'accorde donc pas à un texte déjà jugé trop long.
+            if (
+                not is_too_long
+                and re.search(
+                    ENTITY_COMPANY_MARKERS,
+                    normalized
+                )
             ):
                 score += 50
 
@@ -1114,7 +1218,11 @@ def extract_entities(
                 norm(item["text"]),
                 1
             ) > 1:
-                score += 30
+                # Un nom de marque court qui revient plusieurs fois
+                # dans le document (en-tête, tampons, pied de page)
+                # est un signal fort — plus fiable qu'un marqueur
+                # grammatical isolé dans une longue description.
+                score += 50
 
             if re.search(
                 (
@@ -1175,6 +1283,14 @@ def extract_entities(
                 item[0]
         )
 
+        # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
+        for score_dbg, text_dbg in candidates[:8]:
+            print(
+                f"[DEBUG FOURNISSEUR-FALLBACK] score={score_dbg}  "
+                f"text={text_dbg!r}"
+            )
+        # --- FIN DEBUG ---
+
         if (
             candidates
             and candidates[0][0] > 0
@@ -1182,6 +1298,89 @@ def extract_entities(
             provider = (
                 candidates[0][1]
             )
+
+    # Recherche de secours du client via "Votre Code ICE" : le
+    # candidat le plus proche verticalement au-dessus de ce
+    # libellé, en excluant les chiffres et les mots d'adresse
+    # (rue, ville, étage...) qui font aussi partie de ce bloc
+    # mais ne sont pas le nom du client.
+    if not client and votre_code_item:
+
+        address_noise = re.compile(
+            r"\b(?:"
+            r"RUE|AVENUE|AV\.?|BD|BOULEVARD|PLACE|"
+            r"ETAGE|ETG|N[°ºO]|IMMEUBLE|IMM\.?|"
+            r"RESIDENCE|QUARTIER|LOTISSEMENT|ZONE|"
+            r"RABAT|CASABLANCA|CASA|MARRAKECH|FES|"
+            r"TANGER|AGADIR|MAROC|MOROCCO"
+            r")\b"
+        )
+
+        above_candidates = []
+
+        for item in items:
+
+            if (
+                item["page"]
+                != votre_code_item["page"]
+            ):
+                continue
+
+            delta_y = (
+                votre_code_item["y"]
+                - item["y"]
+            )
+
+            if not (0 <= delta_y <= 0.15):
+                continue
+
+            # Même colonne uniquement (même X) — évite de prendre
+            # un libellé de la colonne de gauche (infos facture)
+            # qui partage juste la même hauteur par coïncidence.
+            if (
+                abs(
+                    item["x"]
+                    - votre_code_item["x"]
+                )
+                >= 0.35
+            ):
+                continue
+
+            if not _entity_ok(
+                item["text"]
+            ):
+                continue
+
+            if re.search(
+                r"\d",
+                item["text"]
+            ):
+                continue
+
+            if address_noise.search(
+                item["n"]
+            ):
+                continue
+
+            if (
+                provider
+                and norm(item["text"])
+                == norm(provider)
+            ):
+                continue
+
+            above_candidates.append(
+                (delta_y, item["text"])
+            )
+
+        if above_candidates:
+
+            above_candidates.sort(
+                key=lambda entry:
+                    entry[0]
+            )
+
+            client = above_candidates[0][1]
 
     return (
         provider or MISSING,
@@ -1381,7 +1580,11 @@ def detect_invoice_reference(
     # donc les formats déjà reconnus (FA1905-0002, 0005/2019, ...)
     # continuent de passer par les patterns existants.
     standalone_label = re.compile(
-        r"^(?:NUMERO|N[°ºO]\.?\s*(?:DE\s+)?(?:LA\s+)?FACTURE)$"
+        r"^(?:"
+        r"NUMERO"
+        r"|N[°ºO]\.?\s*(?:DE\s+)?(?:LA\s+)?FACTURE"
+        r"|FACTURE\s*N[°ºO]\.?"
+        r")$"
     )
 
     for index, line in enumerate(raw_lines):
@@ -1560,6 +1763,10 @@ def identifier_candidates(
         match = re.search(
             (
                 rf"(?:{label})"
+                # Tolère un mot isolé entre le libellé et le
+                # numéro (ex. "R.C. CASA 20.257", où la ville
+                # s'intercale) sans le laisser polluer la valeur.
+                rf"(?:\s+[A-Za-zÀ-ÿ]{{2,15}})?"
                 rf"\s*[:#Nn°º.\-]?\s*"
                 rf"([0-9OoIlSsBbZz]"
                 rf"[0-9 .OoIlSsBbZz]{{0,24}})"
@@ -1896,6 +2103,10 @@ def _identifier_candidates_from_lines(
         for match in re.finditer(
             (
                 rf"(?:{label})"
+                # Tolère un mot isolé entre le libellé et le
+                # numéro (ex. "R.C. CASA 20.257", où la ville
+                # s'intercale) sans le laisser polluer la valeur.
+                rf"(?:\s+[A-Za-zÀ-ÿ]{{2,15}})?"
                 rf"\s*[:#Nn°º.\-]?\s*"
                 rf"([0-9OoIlSsBbZz]"
                 rf"[0-9 .OoIlSsBbZz]{{0,24}})"
@@ -2028,7 +2239,52 @@ def extract_ids(
         )
     )
 
-    if ice_candidates:
+    # Certains fournisseurs (ex. Sérima) utilisent le libellé
+    # explicite "Votre Code ICE" pour désigner sans ambiguïté
+    # l'ICE DU CLIENT. Ce libellé est plus fiable que le scoring
+    # géométrique générique, qui peut être perturbé par une mise
+    # en page en colonnes (infos facture et bloc client entrelacés).
+    votre_code_candidate = None
+
+    for candidate in ice_candidates:
+        if re.search(
+            r"VOTRE\s+CODE",
+            norm(candidate["item"]["text"])
+        ):
+            votre_code_candidate = candidate
+            break
+
+    if votre_code_candidate:
+
+        result["client_ice"] = (
+            votre_code_candidate["value"]
+        )
+
+        remaining = [
+            candidate
+            for candidate in ice_candidates
+            if candidate["value"]
+            != votre_code_candidate["value"]
+        ]
+
+        if remaining:
+
+            remaining.sort(
+                key=lambda candidate:
+                    _id_score(
+                        candidate,
+                        items,
+                        "supplier",
+                        client_anchor
+                    ),
+                reverse=True
+            )
+
+            result["supplier_ice"] = (
+                remaining[0]["value"]
+            )
+
+    elif ice_candidates:
 
         client_rank = sorted(
             ice_candidates,
