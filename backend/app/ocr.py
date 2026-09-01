@@ -2715,6 +2715,14 @@ def get_user_history(
         "desc",
         description="'asc' ou 'desc'"
     ),
+    search: str | None = Query(
+        None,
+        description=(
+            "Filtre sur le nom du client ou du fournisseur "
+            "(recherche 'contient', insensible à la casse). "
+            "S'applique à travers TOUS les lots, sans distinction."
+        )
+    ),
 ):
     # =====================================================
     # CHAMP DE TRI
@@ -2747,6 +2755,22 @@ def get_user_history(
     query = db.query(
         models.Document
     ).order_by(*ordering)
+
+    # =====================================================
+    # RECHERCHE CLIENT / FOURNISSEUR
+    # =====================================================
+
+    # Volontairement AUCUN filtre sur lot_id ici : une recherche
+    # par nom de client remonte ses factures quel que soit le lot
+    # dans lequel elles ont été traitées.
+    if search:
+
+        pattern = f"%{search.strip()}%"
+
+        query = query.filter(
+            models.Document.client.ilike(pattern)
+            | models.Document.provider.ilike(pattern)
+        )
 
     if current_user.role.value in (
         "admin",

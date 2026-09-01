@@ -37,9 +37,43 @@ function LotManagement() {
   const [savingDocument, setSavingDocument] =
     useState(false);
 
+  // Recherche client/fournisseur transversale à tous les lots.
+  const [clientSearch, setClientSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
   useEffect(() => {
     fetchLots();
   }, []);
+
+  // Recherche déclenchée automatiquement (avec un léger délai)
+  // à chaque frappe, indépendamment du lot sélectionné.
+  useEffect(() => {
+    const query = clientSearch.trim();
+
+    if (!query) {
+      setSearchResults([]);
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setSearching(true);
+
+      try {
+        const response = await api.get('/ocr/history', {
+          params: { search: query },
+        });
+
+        setSearchResults(response.data);
+      } catch (requestError) {
+        console.error(requestError);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timeoutId);
+  }, [clientSearch]);
 
   const fetchLots = async () => {
     setLoading(true);
@@ -139,6 +173,41 @@ function LotManagement() {
       fetchLotDetail(lot.id),
       fetchUnassignedDocs(),
     ]);
+  };
+
+  // Depuis un résultat de recherche : ouvre le lot auquel
+  // appartient la facture trouvée (ou signale qu'elle n'est
+  // assignée à aucun lot).
+  const handleGoToDocumentLot = async (document) => {
+    setError('');
+    setSuccessMessage('');
+
+    if (!document.lot_id) {
+      setError(
+        "Cette facture n'est assignée à aucun lot pour "
+          + "l'instant.",
+      );
+      return;
+    }
+
+    const knownLot = lots.find(
+      (lot) => lot.id === document.lot_id,
+    );
+
+    setEditingDocument(null);
+
+    await Promise.all([
+      fetchLotDetail(document.lot_id),
+      fetchUnassignedDocs(),
+    ]);
+
+    if (!knownLot) {
+      // Le lot existe mais n'était pas encore chargé dans la
+      // liste de gauche (cas rare) : on rafraîchit la liste.
+      await fetchLots();
+    }
+
+    setClientSearch('');
   };
 
   const handleAssignDoc = async (documentId) => {
@@ -407,6 +476,145 @@ function LotManagement() {
           gap-6
         "
       >
+        <div
+          className="
+            md:col-span-3
+            bg-white rounded-xl shadow-sm
+            border border-gray-200 p-5
+          "
+        >
+          <h2 className="text-lg font-semibold text-gray-800 mb-1">
+            🔍 Rechercher un client ou fournisseur
+          </h2>
+
+          <p className="text-xs text-gray-400 mb-3">
+            Retrouve toutes les factures correspondantes,
+            tous lots confondus — sans avoir à ouvrir
+            chaque lot un par un.
+          </p>
+
+          <input
+            type="text"
+            placeholder="Nom du client ou du fournisseur..."
+            value={clientSearch}
+            onChange={(event) =>
+              setClientSearch(event.target.value)
+            }
+            className="
+              w-full px-3 py-2
+              border border-gray-300
+              rounded-md text-sm
+              focus:outline-none
+              focus:ring-2
+              focus:ring-blue-500/20
+            "
+          />
+
+          {clientSearch.trim() && (
+            <div className="mt-4">
+              {searching ? (
+                <p className="text-sm text-gray-400">
+                  Recherche...
+                </p>
+              ) : searchResults.length === 0 ? (
+                <p className="text-sm text-gray-400 italic">
+                  Aucune facture trouvée pour «{' '}
+                  {clientSearch}
+                  {' '}».
+                </p>
+              ) : (
+                <div>
+                  <p className="text-xs text-gray-400 mb-2">
+                    {searchResults.length} facture(s)
+                    {' '}
+                    trouvée(s), tous lots confondus.
+                  </p>
+
+                  <div
+                    className="
+                      space-y-2 max-h-96
+                      overflow-y-auto pr-1
+                    "
+                  >
+                    {searchResults.map((document) => (
+                      <div
+                        key={document.id}
+                        className="
+                          flex flex-col sm:flex-row
+                          sm:items-center
+                          sm:justify-between
+                          gap-3 p-3
+                          border border-gray-100
+                          rounded-lg
+                        "
+                      >
+                        <div className="min-w-0">
+                          <div
+                            className="
+                              flex items-center
+                              gap-2 flex-wrap
+                            "
+                          >
+                            <p
+                              className="
+                                text-sm font-medium
+                                text-gray-700 truncate
+                              "
+                            >
+                              {document.filename}
+                            </p>
+
+                            <span
+                              className="
+                                text-[10px]
+                                px-2 py-0.5
+                                rounded-full
+                                bg-purple-50
+                                text-purple-600
+                                border border-purple-100
+                                shrink-0
+                              "
+                            >
+                              {document.lot_id
+                                ? `Lot #${document.lot_id}`
+                                : 'Non assigné'}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {document.client ||
+                              'Client inconnu'}
+                            {' — '}
+                            {document.provider ||
+                              'Fournisseur inconnu'}
+                            {' — '}
+                            {document.total_ttc || '0.00'}
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() =>
+                            handleGoToDocumentLot(
+                              document,
+                            )
+                          }
+                          className="
+                            text-xs text-blue-600
+                            hover:text-blue-800
+                            font-medium shrink-0
+                          "
+                        >
+                          → Voir le lot
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="md:col-span-1 space-y-4">
           <div
             className="

@@ -794,11 +794,21 @@ function Dashboard() {
     setEditorMessage('');
   };
 
-  const filteredHistory = history.filter((document) =>
-    String(document.filename || '')
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase()),
-  );
+  const filteredHistory = history.filter((document) => {
+    const query = searchQuery.toLowerCase();
+
+    return (
+      String(document.filename || '')
+        .toLowerCase()
+        .includes(query) ||
+      String(document.client || '')
+        .toLowerCase()
+        .includes(query) ||
+      String(document.provider || '')
+        .toLowerCase()
+        .includes(query)
+    );
+  });
 
   const icePresentation = getIceVerificationPresentation(
     iceVerification?.status,
@@ -1425,7 +1435,7 @@ function Dashboard() {
           <div className="mb-4">
             <input
               type="text"
-              placeholder="🔍 Rechercher une facture..."
+              placeholder="🔍 Rechercher (fichier, client, fournisseur)..."
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
