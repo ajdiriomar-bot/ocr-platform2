@@ -987,25 +987,6 @@ def extract_entities(
         "provider"
     )
 
-    # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
-    print(
-        "[DEBUG CLIENT] anchor="
-        + repr(
-            client_anchor["text"]
-            if client_anchor else None
-        )
-        + f"  near_entity_result={client!r}"
-    )
-    print(
-        "[DEBUG PROVIDER] anchor="
-        + repr(
-            provider_anchor["text"]
-            if provider_anchor else None
-        )
-        + f"  near_entity_result={provider!r}"
-    )
-    # --- FIN DEBUG ---
-
     # Fallback client basé sur les lignes reconstruites.
     if not client:
 
@@ -1282,14 +1263,6 @@ def extract_entities(
             key=lambda item:
                 item[0]
         )
-
-        # --- DEBUG TEMPORAIRE : à retirer une fois la cause identifiée ---
-        for score_dbg, text_dbg in candidates[:8]:
-            print(
-                f"[DEBUG FOURNISSEUR-FALLBACK] score={score_dbg}  "
-                f"text={text_dbg!r}"
-            )
-        # --- FIN DEBUG ---
 
         if (
             candidates
